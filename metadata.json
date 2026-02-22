@@ -1,0 +1,5 @@
+{
+  "name": "CarDeal Scout",
+  "description": "Analyze car listings from any link to find the best deals, detect red flags, and compare prices using AI.",
+  "requestFramePermissions": []
+}

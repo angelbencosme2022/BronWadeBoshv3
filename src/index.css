@@ -1,0 +1,25 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  body {
+    @apply bg-zinc-50 text-zinc-900 antialiased;
+  }
+}
+
+.glass-card {
+  @apply bg-white/80 backdrop-blur-md border border-zinc-200/50 shadow-sm;
+}
+
+.deal-gradient-great { @apply from-emerald-500 to-teal-600; }
+.deal-gradient-good { @apply from-blue-500 to-indigo-600; }
+.deal-gradient-fair { @apply from-amber-400 to-orange-500; }
+.deal-gradient-poor { @apply from-rose-500 to-red-600; }
+.deal-gradient-suspicious { @apply from-purple-600 to-zinc-900; }
+
