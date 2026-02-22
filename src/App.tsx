@@ -19,7 +19,11 @@ import {
   Info,
   Loader2,
   ExternalLink,
-  ShieldAlert
+  ShieldAlert,
+  LogOut,
+  History,
+  Bookmark,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -36,6 +40,7 @@ import {
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { analyzeCarListing, type CarAnalysis } from './services/geminiService';
+import Auth from './components/Auth';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -52,11 +57,16 @@ const LOADING_MESSAGES = [
 ];
 
 export default function App() {
+  const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
+  const [user, setUser] = useState<{ email: string } | null>(JSON.parse(localStorage.getItem('user') || 'null'));
   const [url, setUrl] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<CarAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingMsgIndex, setLoadingMsgIndex] = useState(0);
+  const [savedDeals, setSavedDeals] = useState<any[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (isAnalyzing) {
@@ -67,6 +77,42 @@ export default function App() {
     }
   }, [isAnalyzing]);
 
+  useEffect(() => {
+    if (token) {
+      fetchSavedDeals();
+    }
+  }, [token]);
+
+  const fetchSavedDeals = async () => {
+    try {
+      const response = await fetch('/api/deals', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setSavedDeals(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch deals", err);
+    }
+  };
+
+  const handleAuthSuccess = (newToken: string, newUser: { email: string }) => {
+    setToken(newToken);
+    setUser(newUser);
+    localStorage.setItem('token', newToken);
+    localStorage.setItem('user', JSON.stringify(newUser));
+  };
+
+  const handleLogout = () => {
+    setToken(null);
+    setUser(null);
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setAnalysis(null);
+    setSavedDeals([]);
+  };
+
   const handleAnalyze = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!url) return;
@@ -74,6 +120,7 @@ export default function App() {
     setIsAnalyzing(true);
     setError(null);
     setAnalysis(null);
+    setShowHistory(false);
     
     try {
       const result = await analyzeCarListing(url);
@@ -82,6 +129,36 @@ export default function App() {
       setError(err.message || "Something went wrong. Please try again.");
     } finally {
       setIsAnalyzing(false);
+    }
+  };
+
+  const saveDeal = async () => {
+    if (!analysis || !token) return;
+    setIsSaving(true);
+    try {
+      const response = await fetch('/api/deals', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          url,
+          make: analysis.make,
+          model: analysis.model,
+          year: analysis.year,
+          price: analysis.price,
+          dealRating: analysis.dealRating,
+          dealScore: analysis.dealScore,
+        }),
+      });
+      if (response.ok) {
+        fetchSavedDeals();
+      }
+    } catch (err) {
+      console.error("Failed to save deal", err);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -96,23 +173,16 @@ export default function App() {
     }
   };
 
-  const getDealGradient = (rating: string) => {
-    switch (rating) {
-      case 'Great': return 'deal-gradient-great';
-      case 'Good': return 'deal-gradient-good';
-      case 'Fair': return 'deal-gradient-fair';
-      case 'Poor': return 'deal-gradient-poor';
-      case 'Suspicious': return 'deal-gradient-suspicious';
-      default: return 'from-zinc-500 to-zinc-600';
-    }
-  };
+  if (!token) {
+    return <Auth onAuthSuccess={handleAuthSuccess} />;
+  }
 
   return (
     <div className="min-h-screen font-sans selection:bg-indigo-100 selection:text-indigo-900">
       {/* Header */}
       <header className="sticky top-0 z-50 glass-card border-b border-zinc-200/50 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 cursor-pointer" onClick={() => { setAnalysis(null); setShowHistory(false); }}>
             <div className="bg-zinc-900 p-2 rounded-lg">
               <Car className="w-6 h-6 text-white" />
             </div>
@@ -120,11 +190,26 @@ export default function App() {
               CarDeal<span className="text-zinc-500">Scout</span>
             </h1>
           </div>
-          <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-zinc-500">
-            <a href="#" className="hover:text-zinc-900 transition-colors">How it works</a>
-            <a href="#" className="hover:text-zinc-900 transition-colors">Market Trends</a>
-            <a href="#" className="hover:text-zinc-900 transition-colors">Saved Deals</a>
-          </nav>
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setShowHistory(!showHistory)}
+              className="flex items-center gap-2 text-sm font-medium text-zinc-500 hover:text-zinc-900 transition-colors"
+            >
+              <History className="w-4 h-4" />
+              History
+            </button>
+            <div className="h-4 w-px bg-zinc-200 mx-2" />
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-medium text-zinc-400 hidden sm:block">{user?.email}</span>
+              <button 
+                onClick={handleLogout}
+                className="p-2 text-zinc-400 hover:text-rose-500 transition-colors"
+                title="Logout"
+              >
+                <LogOut className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -139,16 +224,7 @@ export default function App() {
             Find the <span className="text-zinc-400 italic">perfect</span> deal.<br />
             Avoid the <span className="text-rose-500 underline decoration-rose-200 underline-offset-8">lemons</span>.
           </motion.h2>
-          <motion.p 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="text-zinc-500 text-lg max-w-2xl mx-auto mb-10"
-          >
-            Paste a link from Facebook Marketplace, Craigslist, or any dealership. 
-            Our AI analyzes the listing for value, red flags, and market comparisons.
-          </motion.p>
-
+          
           <motion.form 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -185,6 +261,56 @@ export default function App() {
             </div>
           </motion.form>
         </section>
+
+        {/* History View */}
+        <AnimatePresence>
+          {showHistory && (
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="space-y-6 mb-12"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="font-display text-2xl font-bold">Saved Analysis</h3>
+                <span className="text-sm text-zinc-400">{savedDeals.length} deals saved</span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {savedDeals.map((deal) => (
+                  <div key={deal._id} className="glass-card rounded-3xl p-6 hover:border-zinc-900 transition-all group">
+                    <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">{deal.year} {deal.make}</span>
+                        <h4 className="font-display font-bold text-lg">{deal.model}</h4>
+                      </div>
+                      <div className={cn(
+                        "px-2 py-1 rounded-lg text-[10px] font-bold uppercase",
+                        getDealColor(deal.dealRating)
+                      )}>
+                        {deal.dealRating}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between mt-6">
+                      <span className="text-xl font-bold">${deal.price.toLocaleString()}</span>
+                      <button 
+                        onClick={() => { setUrl(deal.url); handleAnalyze({ preventDefault: () => {} } as any); }}
+                        className="p-2 bg-zinc-100 rounded-xl hover:bg-zinc-900 hover:text-white transition-all"
+                      >
+                        <ArrowRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {savedDeals.length === 0 && (
+                  <div className="col-span-full py-12 text-center border-2 border-dashed border-zinc-200 rounded-3xl">
+                    <Bookmark className="w-8 h-8 text-zinc-200 mx-auto mb-4" />
+                    <p className="text-zinc-400 font-medium">No saved deals yet. Analyze a listing to save it.</p>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Loading State */}
         <AnimatePresence>
@@ -378,29 +504,6 @@ export default function App() {
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
-                    
-                    <div className="grid grid-cols-3 gap-4 mt-8 pt-8 border-t border-zinc-100">
-                      <div className="text-center">
-                        <span className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">Market Avg</span>
-                        <span className="text-lg font-bold">${analysis.marketComparison.averagePrice.toLocaleString()}</span>
-                      </div>
-                      <div className="text-center">
-                        <span className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">Price Diff</span>
-                        <span className={cn(
-                          "text-lg font-bold",
-                          analysis.price < analysis.marketComparison.averagePrice ? "text-emerald-600" : "text-rose-600"
-                        )}>
-                          {analysis.price < analysis.marketComparison.averagePrice ? '-' : '+'}
-                          ${Math.abs(analysis.price - analysis.marketComparison.averagePrice).toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="text-center">
-                        <span className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">Market Range</span>
-                        <span className="text-sm font-medium text-zinc-600">
-                          ${(analysis.marketComparison.lowPrice / 1000).toFixed(1)}k - ${(analysis.marketComparison.highPrice / 1000).toFixed(1)}k
-                        </span>
-                      </div>
-                    </div>
                   </div>
                 </div>
 
@@ -454,15 +557,15 @@ export default function App() {
                         View Original Listing
                         <ExternalLink className="w-4 h-4" />
                       </a>
-                      <button className="w-full py-4 bg-zinc-800 text-white rounded-2xl font-bold border border-zinc-700 hover:bg-zinc-700 transition-colors">
+                      <button 
+                        onClick={saveDeal}
+                        disabled={isSaving}
+                        className="w-full py-4 bg-zinc-800 text-white rounded-2xl font-bold border border-zinc-700 hover:bg-zinc-700 transition-colors flex items-center justify-center gap-2"
+                      >
+                        {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bookmark className="w-4 h-4" />}
                         Save to Favorites
                       </button>
                     </div>
-                  </div>
-
-                  {/* Disclaimer */}
-                  <div className="px-4 text-[10px] text-zinc-400 leading-relaxed text-center">
-                    AI analysis is based on listing text and market data. We do not guarantee accuracy. Always verify details with the seller.
                   </div>
                 </div>
               </div>
@@ -471,7 +574,7 @@ export default function App() {
         </AnimatePresence>
 
         {/* Empty State */}
-        {!analysis && !isAnalyzing && !error && (
+        {!analysis && !isAnalyzing && !error && !showHistory && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -514,7 +617,7 @@ export default function App() {
             <span className="font-display font-bold text-sm tracking-tight">CarDealScout</span>
           </div>
           <div className="text-zinc-400 text-xs">
-            © 2026 CarDeal Scout. Built with Gemini AI.
+            © 2026 CarDeal Scout. Built with Gemini AI & MongoDB.
           </div>
           <div className="flex gap-6 text-zinc-400 text-xs font-medium">
             <a href="#" className="hover:text-zinc-900">Privacy</a>
