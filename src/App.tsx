@@ -7,7 +7,6 @@ import React, { useState, useEffect } from 'react';
 import { 
   Search, 
   Car, 
-  AlertTriangle, 
   CheckCircle2, 
   XCircle, 
   TrendingUp, 
@@ -21,11 +20,17 @@ import {
   ExternalLink,
   ShieldAlert,
   LogOut,
+  MessageSquare,
+  Quote,
+  Fingerprint,
+  Wrench,
+  AlertTriangle,
   History,
   Bookmark,
   Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import ReactMarkdown from 'react-markdown';
 import { 
   BarChart, 
   Bar, 
@@ -124,9 +129,14 @@ export default function App() {
     
     try {
       const result = await analyzeCarListing(url);
+      console.log("Analysis Result:", result);
       setAnalysis(result);
     } catch (err: any) {
-      setError(err.message || "Something went wrong. Please try again.");
+      if (err.message?.includes("429") || err.message?.includes("quota")) {
+        setError("API Rate Limit Reached. Please wait about 60 seconds and try again. The free tier has strict limits on how many cars you can analyze per minute.");
+      } else {
+        setError(err.message || "Something went wrong. Please try again.");
+      }
     } finally {
       setIsAnalyzing(false);
     }
@@ -150,6 +160,14 @@ export default function App() {
           price: analysis.price,
           dealRating: analysis.dealRating,
           dealScore: analysis.dealScore,
+          negotiationPitch: analysis.negotiationPitch,
+          vin: analysis.vin,
+          vinData: analysis.vinData,
+          summary: analysis.summary,
+          pros: analysis.pros,
+          cons: analysis.cons,
+          redFlags: analysis.redFlags,
+          marketComparison: analysis.marketComparison
         }),
       });
       if (response.ok) {
@@ -293,7 +311,10 @@ export default function App() {
                     <div className="flex items-center justify-between mt-6">
                       <span className="text-xl font-bold">${deal.price.toLocaleString()}</span>
                       <button 
-                        onClick={() => { setUrl(deal.url); handleAnalyze({ preventDefault: () => {} } as any); }}
+                        onClick={() => { 
+                          setAnalysis(deal); 
+                          setShowHistory(false); 
+                        }}
                         className="p-2 bg-zinc-100 rounded-xl hover:bg-zinc-900 hover:text-white transition-all"
                       >
                         <ArrowRight className="w-4 h-4" />
@@ -346,10 +367,19 @@ export default function App() {
           <motion.div 
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="max-w-xl mx-auto p-4 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-3 text-rose-700"
+            className="max-w-xl mx-auto p-6 bg-rose-50 border border-rose-200 rounded-3xl flex flex-col items-center gap-4 text-center"
           >
-            <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
-            <p className="text-sm font-medium">{error}</p>
+            <div className="flex items-start gap-3 text-rose-700">
+              <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+              <p className="text-sm font-medium">{error}</p>
+            </div>
+            <button 
+              onClick={handleAnalyze}
+              className="px-6 py-2 bg-rose-600 text-white rounded-xl font-bold hover:bg-rose-700 transition-all shadow-lg shadow-rose-200 flex items-center gap-2"
+            >
+              <Loader2 className={`w-4 h-4 ${isAnalyzing ? 'animate-spin' : ''}`} />
+              Try Again
+            </button>
           </motion.div>
         )}
 
@@ -446,6 +476,134 @@ export default function App() {
                       </ul>
                     </div>
                   </div>
+
+                  {/* Negotiation Pitch Card */}
+                  <div className="glass-card rounded-3xl p-8 border-indigo-100 bg-indigo-50/10">
+                    <h4 className="font-display text-lg font-bold mb-6 flex items-center gap-2">
+                      <MessageSquare className="w-5 h-5 text-indigo-500" />
+                      Negotiation Strategy
+                    </h4>
+                    <div className="relative">
+                      <Quote className="absolute -left-2 -top-2 w-8 h-8 text-indigo-100 -z-10" />
+                      <div className="prose prose-sm max-w-none text-zinc-600 leading-relaxed pl-4">
+                        {analysis.negotiationPitch ? (
+                          <ReactMarkdown>{analysis.negotiationPitch}</ReactMarkdown>
+                        ) : (
+                          <p className="italic text-zinc-400">
+                            No specific negotiation strategy was generated for this listing. 
+                            Try re-analyzing or check the pros/cons for leverage.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="mt-6 p-4 bg-white rounded-2xl border border-indigo-50 text-xs text-indigo-600 font-medium flex items-start gap-3">
+                      <Info className="w-4 h-4 shrink-0 mt-0.5" />
+                      Tip: Use these points to justify a lower offer based on the specific condition and market data found in this listing.
+                    </div>
+                  </div>
+
+                  {/* VIN Report Card */}
+                  {analysis.vin && (
+                    <div className="glass-card rounded-3xl p-8 border-zinc-200">
+                      <div className="flex items-center justify-between mb-8">
+                        <h4 className="font-display text-lg font-bold flex items-center gap-2">
+                          <Fingerprint className="w-5 h-5 text-zinc-400" />
+                          Vehicle Identity Report
+                        </h4>
+                        <span className="text-xs font-mono bg-zinc-100 px-3 py-1 rounded-full text-zinc-600">
+                          VIN: {analysis.vin}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+                        {/* Factory Specs */}
+                        <div className="space-y-4">
+                          <h5 className="text-sm font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                            <Wrench className="w-4 h-4" />
+                            Factory Specifications
+                          </h5>
+                          <div className="bg-zinc-50 rounded-2xl p-6 space-y-4">
+                            <div className="flex justify-between items-center border-bottom border-zinc-100 pb-2">
+                              <span className="text-sm text-zinc-500">Manufacturer</span>
+                              <span className="text-sm font-medium">{analysis.vinData?.manufacturer || 'N/A'}</span>
+                            </div>
+                            <div className="flex justify-between items-center border-bottom border-zinc-100 pb-2">
+                              <span className="text-sm text-zinc-500">Assembly Plant</span>
+                              <span className="text-sm font-medium">{analysis.vinData?.plantCountry || 'N/A'}</span>
+                            </div>
+                            <div className="flex justify-between items-center border-bottom border-zinc-100 pb-2">
+                              <span className="text-sm text-zinc-500">Body Class</span>
+                              <span className="text-sm font-medium">{analysis.vinData?.bodyClass || 'N/A'}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-zinc-500">Engine / Fuel</span>
+                              <span className="text-sm font-medium">{analysis.vinData?.engineHP ? `${analysis.vinData.engineHP} HP` : ''} {analysis.vinData?.fuelType}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Recalls */}
+                        <div className="space-y-4">
+                          <h5 className="text-sm font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                            <AlertTriangle className="w-4 h-4" />
+                            Safety Recalls
+                          </h5>
+                          <div className="space-y-3">
+                            {analysis.vinData?.recalls && analysis.vinData.recalls.length > 0 ? (
+                              analysis.vinData.recalls.slice(0, 3).map((recall, i) => (
+                                <div key={i} className="p-4 bg-rose-50 border border-rose-100 rounded-2xl">
+                                  <div className="flex items-center gap-2 text-rose-700 font-bold text-xs mb-1">
+                                    <ShieldAlert className="w-3 h-3" />
+                                    {recall.NHTSACampaignNumber}
+                                  </div>
+                                  <p className="text-xs text-rose-800 line-clamp-2">{recall.Summary}</p>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="p-6 bg-emerald-50 border border-emerald-100 rounded-2xl flex items-center gap-3 text-emerald-700">
+                                <CheckCircle2 className="w-5 h-5" />
+                                <span className="text-sm font-medium">No active recalls found</span>
+                              </div>
+                            )}
+                            {analysis.vinData?.recalls && analysis.vinData.recalls.length > 3 && (
+                              <p className="text-center text-[10px] text-zinc-400">
+                                + {analysis.vinData.recalls.length - 3} more recalls found
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Accident & Title History */}
+                      <div className="pt-8 border-t border-zinc-100">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                          <div className="space-y-4">
+                            <h5 className="text-sm font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                              <ShieldAlert className="w-4 h-4" />
+                              Title Status
+                            </h5>
+                            <div className={`p-4 rounded-2xl border flex items-center gap-3 ${
+                              analysis.vinData?.titleStatus?.toLowerCase().includes('clean') 
+                                ? 'bg-emerald-50 border-emerald-100 text-emerald-700' 
+                                : 'bg-rose-50 border-rose-100 text-rose-700'
+                            }`}>
+                              {analysis.vinData?.titleStatus?.toLowerCase().includes('clean') ? <CheckCircle2 className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
+                              <span className="font-bold">{analysis.vinData?.titleStatus || 'Unknown'}</span>
+                            </div>
+                          </div>
+                          <div className="space-y-4">
+                            <h5 className="text-sm font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                              <History className="w-4 h-4" />
+                              Accident & Damage Records
+                            </h5>
+                            <div className="p-4 bg-zinc-50 rounded-2xl text-sm text-zinc-600 leading-relaxed">
+                              {analysis.vinData?.accidentHistory || "No public accident records found via automated search. Always verify with a professional vehicle history report (e.g., Carfax)."}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Market Comparison Chart */}
                   <div className="glass-card rounded-3xl p-8">

@@ -22,57 +22,116 @@ export interface CarAnalysis {
     highPrice: number;
     similarCarsCount: number;
   };
+  negotiationPitch: string;
+  vin?: string;
+  vinData?: {
+    manufacturer?: string;
+    plantCountry?: string;
+    bodyClass?: string;
+    engineHP?: string;
+    fuelType?: string;
+    recalls?: any[];
+    accidentHistory?: string;
+    titleStatus?: string;
+  };
 }
 
 export async function analyzeCarListing(url: string): Promise<CarAnalysis> {
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: `Analyze this car listing URL: ${url}. 
-    Extract the key details and provide a comprehensive deal analysis. 
-    If you cannot find specific data, estimate based on the model and year.
-    Identify any red flags in the description (e.g., title issues, mechanical warnings, suspicious wording).
-    Compare the price to typical market values for this specific year, make, and model.`,
-    config: {
-      tools: [{ urlContext: {} }],
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          make: { type: Type.STRING },
-          model: { type: Type.STRING },
-          year: { type: Type.INTEGER },
-          price: { type: Type.NUMBER },
-          mileage: { type: Type.NUMBER },
-          location: { type: Type.STRING },
-          condition: { type: Type.STRING },
-          dealRating: { type: Type.STRING, description: "One of: Great, Good, Fair, Poor, Suspicious" },
-          dealScore: { type: Type.INTEGER, description: "Score from 0 to 100" },
-          summary: { type: Type.STRING },
-          redFlags: { type: Type.ARRAY, items: { type: Type.STRING } },
-          pros: { type: Type.ARRAY, items: { type: Type.STRING } },
-          cons: { type: Type.ARRAY, items: { type: Type.STRING } },
-          marketComparison: {
-            type: Type.OBJECT,
-            properties: {
-              averagePrice: { type: Type.NUMBER },
-              lowPrice: { type: Type.NUMBER },
-              highPrice: { type: Type.NUMBER },
-              similarCarsCount: { type: Type.INTEGER }
-            },
-            required: ["averagePrice", "lowPrice", "highPrice", "similarCarsCount"]
+  const makeRequest = async (retryCount = 0): Promise<CarAnalysis> => {
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: `Analyze this car listing URL: ${url}. 
+        Extract the key details and provide a comprehensive deal analysis in JSON format. 
+        If you cannot find specific data, estimate based on the model and year.
+        VERY IMPORTANT: Look for a VIN (Vehicle Identification Number) in the text or attributes.
+        If a VIN is found, use Google Search to check for public records, auction history (like Copart or IAAI), and any reported accidents or title issues (salvage, rebuilt, flood damage).
+        Identify any red flags in the description (e.g., title issues, mechanical warnings, suspicious wording).
+        Compare the price to typical market values for this specific year, make, and model.
+        Finally, generate a "Negotiation Pitch": This MUST be a detailed, persuasive script or step-by-step strategy (at least 2-3 paragraphs or bullet points). 
+        The pitch should tell the buyer exactly what to say to the seller, specifically leveraging the identified cons, red flags, and market data to justify a lower price. 
+        Do not leave this field empty.
+        
+        Return ONLY a JSON object with these keys:
+        {
+          "make": string,
+          "model": string,
+          "year": number,
+          "price": number,
+          "mileage": number,
+          "location": string,
+          "condition": string,
+          "vin": string (17 chars if found),
+          "dealRating": "Great" | "Good" | "Fair" | "Poor" | "Suspicious",
+          "dealScore": number (0-100),
+          "summary": string,
+          "redFlags": string[],
+          "pros": string[],
+          "cons": string[],
+          "marketComparison": {
+            "averagePrice": number,
+            "lowPrice": number,
+            "highPrice": number,
+            "similarCarsCount": number
+          },
+          "negotiationPitch": string,
+          "vinData": {
+            "accidentHistory": string (Summary of any accidents found via search),
+            "titleStatus": string (e.g., Clean, Salvage, Rebuilt, Unknown)
           }
-        },
-        required: ["make", "model", "year", "price", "mileage", "dealRating", "dealScore", "summary", "redFlags", "pros", "cons", "marketComparison"]
-      }
-    }
-  });
+        }`,
+        config: {
+          tools: [{ urlContext: {} }, { googleSearch: {} }],
+        }
+      });
 
-  try {
-    const text = response.text;
-    if (!text) throw new Error("No response from AI");
-    return JSON.parse(text);
-  } catch (error) {
-    console.error("Error parsing Gemini response:", error);
-    throw new Error("Failed to analyze the listing. Please check the URL and try again.");
-  }
+      let text = response.text;
+      if (!text) throw new Error("No response from AI");
+      
+      // Clean up markdown code blocks if present
+      text = text.replace(/```json\n?/, "").replace(/```\n?/, "").trim();
+      
+      const analysis: CarAnalysis = JSON.parse(text);
+
+      // If VIN is found, fetch additional data from NHTSA
+      if (analysis.vin && analysis.vin.length === 17) {
+        try {
+          const vinResponse = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${analysis.vin}?format=json`);
+          const vinJson = await vinResponse.json();
+          const data = vinJson.Results[0];
+
+          // Initialize vinData if it doesn't exist (it should from the AI response)
+          if (!analysis.vinData) analysis.vinData = {};
+
+          analysis.vinData = {
+            ...analysis.vinData,
+            manufacturer: data.Manufacturer,
+            plantCountry: data.PlantCountry,
+            bodyClass: data.BodyClass,
+            engineHP: data.EngineHP,
+            fuelType: data.FuelTypePrimary,
+          };
+
+          // Fetch recalls
+          const recallResponse = await fetch(`https://api.nhtsa.gov/recalls/recallsByVehicle?make=${analysis.make}&model=${analysis.model}&modelYear=${analysis.year}`);
+          const recallJson = await recallResponse.json();
+          analysis.vinData.recalls = recallJson.results || [];
+        } catch (vinErr) {
+          console.error("Error fetching VIN data:", vinErr);
+        }
+      }
+
+      return analysis;
+    } catch (error: any) {
+      // If we hit a rate limit (429) and haven't retried yet, wait 2 seconds and try again
+      if (error.message?.includes("429") && retryCount < 1) {
+        console.log("Rate limit hit, retrying in 2 seconds...");
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        return makeRequest(retryCount + 1);
+      }
+      throw error;
+    }
+  };
+
+  return makeRequest();
 }
